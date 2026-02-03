@@ -26,15 +26,16 @@ class EyeRubbingDetectorDebug:
         )
         self.face_detector = vision.FaceLandmarker.create_from_options(options)
 
-        # Initialize MediaPipe Hands
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=2,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        # Initialize MediaPipe Hand Landmarker (new API)
+        hand_base_options = python.BaseOptions(
+            model_asset_path='hand_landmarker.task'
         )
-        self.mp_drawing = mp.solutions.drawing_utils
+        hand_options = vision.HandLandmarkerOptions(
+            base_options=hand_base_options,
+            num_hands=2,
+            running_mode=vision.RunningMode.VIDEO
+        )
+        self.hand_detector = vision.HandLandmarker.create_from_options(hand_options)
 
         # Camera
         self.cap = cv2.VideoCapture(0)
@@ -45,7 +46,7 @@ class EyeRubbingDetectorDebug:
 
         # Detection tracking
         self.rubbing_counter = 0
-        self.proximity_threshold = 0.15  # Distance threshold
+        self.proximity_threshold = 0.10  # Distance threshold (smaller = need to be closer)
 
     def calculate_distance(self, point1, point2):
         """Calculate 2D distance between two points."""
@@ -79,9 +80,11 @@ class EyeRubbingDetectorDebug:
                 print(f"Face detection error: {e}")
 
             # Detect hands
-            hand_results = None
+            hand_landmarks = None
             try:
-                hand_results = self.hands.process(rgb_frame)
+                hand_result = self.hand_detector.detect_for_video(mp_image, self.frame_timestamp_ms)
+                if hand_result.hand_landmarks:
+                    hand_landmarks = hand_result.hand_landmarks
             except Exception as e:
                 print(f"Hand detection error: {e}")
 
@@ -106,18 +109,35 @@ class EyeRubbingDetectorDebug:
                 hand_near_eye = False
                 min_distance = 999
 
-                if hand_results and hand_results.multi_hand_landmarks:
+                if hand_landmarks:
                     # Draw all detected hands
-                    for hand_landmarks in hand_results.multi_hand_landmarks:
-                        self.mp_drawing.draw_landmarks(
-                            frame,
-                            hand_landmarks,
-                            self.mp_hands.HAND_CONNECTIONS
-                        )
+                    for hand in hand_landmarks:
+                        # Draw hand skeleton
+                        for landmark in hand:
+                            x = int(landmark.x * frame_width)
+                            y = int(landmark.y * frame_height)
+                            cv2.circle(frame, (x, y), 5, (255, 0, 255), -1)
+
+                        # Draw connections between landmarks
+                        connections = [
+                            (0, 1), (1, 2), (2, 3), (3, 4),  # Thumb
+                            (0, 5), (5, 6), (6, 7), (7, 8),  # Index
+                            (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
+                            (0, 13), (13, 14), (14, 15), (15, 16),  # Ring
+                            (0, 17), (17, 18), (18, 19), (19, 20),  # Pinky
+                            (5, 9), (9, 13), (13, 17)  # Palm
+                        ]
+                        for connection in connections:
+                            start_idx, end_idx = connection
+                            start = hand[start_idx]
+                            end = hand[end_idx]
+                            start_pos = (int(start.x * frame_width), int(start.y * frame_height))
+                            end_pos = (int(end.x * frame_width), int(end.y * frame_height))
+                            cv2.line(frame, start_pos, end_pos, (255, 0, 255), 2)
 
                         # Check key hand points (wrist, fingertips)
                         for point_idx in [0, 4, 8, 12, 16, 20]:  # Wrist and fingertips
-                            point = hand_landmarks.landmark[point_idx]
+                            point = hand[point_idx]
                             hand_x = point.x
                             hand_y = point.y
 
