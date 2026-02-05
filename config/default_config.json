@@ -1,0 +1,41 @@
+{
+  "detectors": {
+    "mouth_breathing": {
+      "enabled": false,
+      "mar_threshold": 0.05,
+      "frames_threshold": 120
+    },
+    "blink_rate": {
+      "enabled": false,
+      "ear_threshold": 0.012,
+      "low_blink_threshold": 6,
+      "check_interval": 60
+    },
+    "eye_rubbing": {
+      "enabled": false,
+      "proximity_threshold": 0.02,
+      "frames_threshold": 30
+    },
+    "face_touching": {
+      "enabled": false,
+      "horizontal_threshold": 0.12,
+      "vertical_threshold": 0.35,
+      "max_touches": 5,
+      "check_period": 120
+    },
+    "hydration": {
+      "enabled": false,
+      "interval_minutes": 45
+    }
+  },
+  "alerts": {
+    "notifications_enabled": true,
+    "audio_enabled": true,
+    "cooldown_seconds": 60
+  },
+  "camera": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  }
+}
