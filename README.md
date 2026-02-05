@@ -1,214 +1,71 @@
-# Comprehensive Health Monitor
+# Habit Tracker
 
-An AI-powered health monitoring system that uses your computer's camera to track various health indicators and remind you to maintain healthy computing habits.
+A Mac menu bar application that monitors computer usage habits and provides intelligent alerts to promote healthier computing.
+
+## Overview
+
+Habit Tracker runs silently in your Mac's menu bar, using your camera to detect unhealthy habits like mouth breathing, insufficient blinking, eye rubbing, and excessive face touching. When a habit is detected, you'll receive gentle notifications to help you correct the behavior.
 
 ## Features
 
-### 9 Health Detectors
+- 🌬️ **Mouth Breathing Detection** - Alerts when breathing through mouth instead of nose
+- 👁️ **Blink Rate Monitoring** - Tracks blink frequency (should be 6+ per minute)
+- 🤚 **Eye Rubbing Detection** - Warns when rubbing eyes too frequently
+- 👆 **Face Touching Detection** - Monitors excessive face touching (hygiene & stress indicator)
+- 💧 **Hydration Reminders** - Reminds you to drink water at regular intervals
 
-1. **Mouth Breathing Detector**
-   - Detects when you breathe through your mouth instead of your nose
-   - Helps maintain proper breathing habits
-   - Alert after 4 seconds of mouth breathing
+## Technology
 
-2. **Blink Rate Monitor**
-   - Tracks your blink rate to prevent eye strain
-   - Normal: 15-20 blinks/minute
-   - Alerts when rate drops below 6 blinks/minute (common during computer use)
+- **Computer Vision**: MediaPipe for face and hand landmark detection
+- **UI**: rumps (Mac menu bar framework)
+- **Alerts**: macOS notifications + audio alerts
+- **Threading**: Background camera processing for non-intrusive operation
 
-3. **Posture Monitor**
-   - Detects when you're sitting too close to the screen
-   - Alerts when your head is tilted at an unhealthy angle
-   - Helps prevent "tech neck" and back problems
+## Project Status
 
-4. **Fatigue Detector**
-   - Detects yawning patterns
-   - Alerts after multiple yawns in 5 minutes
-   - Suggests taking a break when tired
+**Current Phase:** Planning & Setup
+- ✅ Individual detectors tested and calibrated
+- ✅ Comprehensive implementation plan created
+- 🚧 Menu bar app architecture in progress
 
-5. **Hydration Reminder**
-   - Time-based reminders to drink water
-   - Default: every 45 minutes
-   - Press 'h' to reset timer after drinking
+See [PLAN.md](PLAN.md) for detailed implementation roadmap.
 
-6. **Eye Rubbing Detector**
-   - Detects when you rub your eyes
-   - Sign of fatigue or eye strain
-   - Can cause irritation
+## Original Research
 
-7. **Face Touching Monitor**
-   - Tracks frequent face touching
-   - Hygiene concern and stress indicator
-   - Alerts after 5 touches in 2 minutes
+The `_archive_original_detectors/` folder contains the original test scripts and detector implementations that were used to validate each detection algorithm and calibrate thresholds for accuracy.
 
-8. **Screen Focus Monitor**
-   - Detects when you're looking away from screen
-   - Tracks attention and focus
-   - Alerts after extended distraction
-
-9. **Phone Distraction Detector**
-   - Detects when you're likely looking at your phone (head down)
-   - Helps maintain work focus
-   - Alerts after 3 seconds
-
-## Installation
-
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Ensure model file exists:**
-   - The `face_landmarker.task` file should be in the project directory
-   - It was downloaded during initial setup
-
-## Usage
-
-### Run the Health Monitor
+## Requirements
 
 ```bash
-python3 health_monitor.py
+opencv-python>=4.8.0
+mediapipe>=0.10.30
+numpy>=1.24.0
+rumps>=0.4.0
+pygame>=2.5.0
 ```
 
-### Controls
+## Installation (Future)
 
-- **q**: Quit the application
-- **h**: Reset hydration timer (press after drinking water)
-- **SPACE**: Toggle visual overlays on/off
-- **1-9**: Toggle individual detectors on/off
+_Coming soon - will be available as standalone Mac app_
 
-### On-Screen Display
+## Development
 
-- **Status Panel (right side)**: Shows all active detectors and their current status
-- **Warning Banner (top)**: Displays active warnings in red
-- **Visual Indicators**: Colored boxes and lines around detected features
-  - Green: Normal/Good
-  - Orange: Warning threshold approaching
-  - Red: Issue detected/Warning active
+```bash
+# Install dependencies
+pip install -r requirements.txt
 
-## Project Structure
-
-```
-woi/
-├── health_monitor.py              # Main application
-├── mouth_breathing_detector.py    # Original standalone detector
-├── face_landmarker.task          # MediaPipe model file
-├── requirements.txt              # Python dependencies
-├── README.md                     # This file
-└── base_models/                  # Detector modules
-    ├── __init__.py
-    ├── base_detector.py          # Base class for all detectors
-    ├── mouth_breathing_detector.py
-    ├── blink_detector.py
-    ├── posture_detector.py
-    ├── fatigue_detector.py
-    ├── hydration_detector.py
-    ├── eye_rubbing_detector.py
-    ├── face_touching_detector.py
-    ├── focus_detector.py
-    └── phone_detector.py
+# Run (once implemented)
+python main.py
 ```
 
-## Configuration
+## Privacy
 
-Each detector can be customized by modifying its initialization parameters in `health_monitor.py`:
-
-```python
-self.detectors = {
-    'mouth_breathing': MouthBreathingDetector(threshold=0.05),
-    'blink': BlinkDetector(low_blink_threshold=6),
-    'posture': PostureDetector(min_face_width_ratio=0.35),
-    'fatigue': FatigueDetector(max_yawns=3),
-    'hydration': HydrationDetector(interval_minutes=45),
-    # ... etc
-}
-```
-
-## How It Works
-
-### Technology Stack
-
-- **OpenCV**: Camera access and image processing
-- **MediaPipe Face Landmarker**: Real-time facial landmark detection (478 landmarks)
-- **MediaPipe Hands**: Hand detection for touch/rubbing detection
-- **NumPy**: Mathematical calculations
-
-### Detection Methods
-
-- **Face-based**: Mouth breathing, blinking, posture, fatigue, focus
-- **Hand-based**: Eye rubbing, face touching
-- **Hybrid**: Phone detection (head angle + hand position)
-- **Time-based**: Hydration reminders
-
-### Architecture
-
-- **Modular Design**: Each detector is an independent class
-- **Base Class Pattern**: All detectors inherit from `BaseDetector`
-- **Shared Resources**: Single camera and MediaPipe instance
-- **Real-time Processing**: ~30 FPS with all detectors active
-
-## Tips for Best Results
-
-1. **Lighting**: Ensure good lighting for accurate face detection
-2. **Camera Position**: Position camera at eye level, arm's length away
-3. **Calibration**: First run will help you understand your normal ranges
-4. **Thresholds**: Adjust sensitivity in detector initialization if needed
-5. **Hand Detection**: Works best with hands clearly visible to camera
-
-## Troubleshooting
-
-### No face detected
-- Ensure adequate lighting
-- Check camera is not blocked
-- Move closer to camera
-
-### Too many false positives
-- Adjust thresholds in detector initialization
-- Disable overly sensitive detectors using number keys
-
-### Low performance
-- Close other applications
-- Reduce camera resolution in `health_monitor.py`
-- Disable some detectors
-
-### Hand detection not working
-- Ensure hands are visible to camera
-- Check MediaPipe Hands is properly installed
-- Verify lighting conditions
-
-## Health Benefits
-
-- **Reduced Eye Strain**: Through blink monitoring and break reminders
-- **Better Posture**: Prevents neck and back problems
-- **Improved Focus**: Reduces distractions
-- **Better Hydration**: Regular water intake reminders
-- **Fatigue Management**: Encourages breaks when tired
-- **Better Breathing**: Promotes nasal breathing
-- **Hygiene**: Reduces face touching
-
-## Future Enhancements
-
-Possible additions:
-- Audio alerts (currently visual only)
-- Statistics tracking and logging
-- Machine learning-based personalization
-- Multiple user profiles
-- Integration with productivity apps
-- Mobile companion app
-
-## Privacy Note
-
-- All processing happens locally on your machine
-- No data is sent to external servers
-- Camera feed is not recorded or saved
-- You have full control over when monitoring is active
+All processing happens locally on your Mac. No images or data are sent to any external servers. The camera is only active when detectors are enabled, and you have full control over which features to use.
 
 ## License
 
-This project is for personal use and health monitoring.
+_To be determined_
 
-## Acknowledgments
+---
 
-- MediaPipe by Google for face and hand detection
-- OpenCV for computer vision capabilities
-- The Python community for excellent libraries
+**Note:** This project is currently in development. See PLAN.md for implementation progress.
