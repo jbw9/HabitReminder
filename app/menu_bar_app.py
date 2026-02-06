@@ -7,9 +7,10 @@ of the dropdown (rendered via an NSImageView in a custom NSMenuItem).
 
 import queue
 import rumps
+import objc
 
 from AppKit import NSImageView, NSView, NSMakeRect
-from Foundation import NSRunLoop
+from Foundation import NSRunLoop, NSTimer, NSRunLoopCommonModes, NSObject
 
 from app.detector_manager import DetectorManager
 from app.camera_thread import CameraThread
@@ -19,6 +20,22 @@ from app.preview_window import frame_to_nsimage
 # Inline preview dimensions
 PREVIEW_W = 320
 PREVIEW_H = 180
+
+
+# ── Timer target (NSObject subclass for NSTimer callback) ─────────────────
+class _PreviewTimerTarget(NSObject):
+    """NSObject subclass that receives NSTimer fire events."""
+
+    def initWithCallback_(self, callback):
+        self = objc.super(_PreviewTimerTarget, self).init()
+        if self is None:
+            return None
+        self._callback = callback
+        return self
+
+    def timerFired_(self, timer):
+        if self._callback:
+            self._callback()
 
 
 class HealthMonitorApp(rumps.App):
@@ -92,18 +109,22 @@ class HealthMonitorApp(rumps.App):
         self._alert_timer = rumps.Timer(self._check_alerts, 0.5)
         self._alert_timer.start()
 
-        # Preview updater — runs at ~15 fps.  Callback is a fast no-op
-        # when preview is off.  We also schedule the NSTimer in event-
-        # tracking mode so it keeps firing while the dropdown is open.
-        self._preview_timer = rumps.Timer(self._update_preview, 1.0 / 15)
-        self._preview_timer.start()
-        try:
-            NSRunLoop.currentRunLoop().addTimer_forMode_(
-                self._preview_timer._timer,
-                "NSEventTrackingRunLoopMode",
-            )
-        except Exception:
-            pass  # preview will just freeze while menu is open
+        # Preview updater — runs at ~15 fps using a raw NSTimer scheduled
+        # in NSRunLoopCommonModes so it fires even while the menu is open.
+        self._preview_timer_target = _PreviewTimerTarget.alloc().initWithCallback_(
+            self._update_preview_tick
+        )
+        self._preview_ns_timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            1.0 / 15,
+            self._preview_timer_target,
+            objc.selector(self._preview_timer_target.timerFired_, signature=b'v@:@'),
+            None,
+            True,
+        )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(
+            self._preview_ns_timer,
+            NSRunLoopCommonModes,
+        )
 
     # ── Detector toggles ───────────────────────────────────────────────
 
@@ -153,8 +174,11 @@ class HealthMonitorApp(rumps.App):
         self.camera_thread.set_preview(enabled)
         self._preview_menu_item._menuitem.setHidden_(not enabled)
 
-    def _update_preview(self, _):
-        """~15 Hz on the main thread — converts latest frame to NSImage."""
+    def _update_preview_tick(self):
+        """~15 Hz on the main thread — converts latest frame to NSImage.
+
+        Called by raw NSTimer (no sender argument).
+        """
         if not self._preview_enabled:
             return
         frame = self.camera_thread.latest_preview_frame
@@ -163,6 +187,8 @@ class HealthMonitorApp(rumps.App):
         ns_image = frame_to_nsimage(frame)
         if ns_image is not None:
             self._preview_image_view.setImage_(ns_image)
+            # Force the view to redraw immediately
+            self._preview_image_view.setNeedsDisplay_(True)
 
     # ── Alerts ─────────────────────────────────────────────────────────
 
