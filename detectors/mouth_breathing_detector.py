@@ -3,7 +3,8 @@
 Mouth Breathing Detector
 Detects when user breathes through mouth instead of nose.
 Uses Mouth Aspect Ratio (MAR) calculation.
-Calibrated threshold: 0.05 MAR, 120 frames (~4s at 30fps).
+Uses inner lip landmarks (82, 87) for accurate detection.
+Calibrated threshold: 0.15 MAR, 120 frames (~4s at 30fps).
 """
 
 from detectors.base_detector import BaseDetector
@@ -13,12 +14,14 @@ class MouthBreathingDetector(BaseDetector):
     """Detects mouth breathing patterns."""
 
     # Mouth landmark indices (MediaPipe Face Mesh)
-    UPPER_LIP = 13
-    LOWER_LIP = 14
+    # Using INNER lip edges (82, 87) instead of outer (13, 14)
+    # Inner edges touch when mouth is closed, giving MAR ≈ 0
+    UPPER_LIP_INNER = 82
+    LOWER_LIP_INNER = 87
     LEFT_CORNER = 61
     RIGHT_CORNER = 291
 
-    def __init__(self, mar_threshold=0.05, frames_threshold=120):
+    def __init__(self, mar_threshold=0.15, frames_threshold=120):
         super().__init__(
             name="Mouth Breathing",
             alert_message="Close your mouth! Breathe through your nose.",
@@ -34,10 +37,10 @@ class MouthBreathingDetector(BaseDetector):
         self._counter = 0
 
     def _calculate_mar(self, landmarks):
-        """Calculate Mouth Aspect Ratio (MAR)."""
+        """Calculate Mouth Aspect Ratio (MAR) using inner lip edges."""
         try:
-            upper_lip = landmarks[self.UPPER_LIP]
-            lower_lip = landmarks[self.LOWER_LIP]
+            upper_lip = landmarks[self.UPPER_LIP_INNER]
+            lower_lip = landmarks[self.LOWER_LIP_INNER]
             vertical = abs(upper_lip.y - lower_lip.y)
 
             left_corner = landmarks[self.LEFT_CORNER]

@@ -50,7 +50,7 @@ class HealthMonitorApp(rumps.App):
     }
 
     def __init__(self):
-        super().__init__("Habit Tracker", quit_button=None)
+        super().__init__("HT", quit_button=None)
 
         # Core components
         self.detector_manager = DetectorManager()
