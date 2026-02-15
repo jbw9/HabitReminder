@@ -11,10 +11,6 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from detectors.mouth_breathing_detector import MouthBreathingDetector
-from detectors.blink_detector import BlinkDetector
-from detectors.eye_rubbing_detector import EyeRubbingDetector
-from detectors.face_touching_detector import FaceTouchingDetector
-from detectors.hydration_detector import HydrationDetector
 
 
 class DetectorManager:
@@ -23,10 +19,6 @@ class DetectorManager:
     # Map of detector keys to human-readable names
     DETECTOR_NAMES = {
         'mouth_breathing': 'Mouth Breathing',
-        'blink_rate': 'Blink Rate',
-        'eye_rubbing': 'Eye Rubbing',
-        'face_touching': 'Face Touching',
-        'hydration': 'Hydration',
     }
 
     def __init__(self, model_dir=None):
@@ -41,18 +33,15 @@ class DetectorManager:
 
         self.detectors = {}
         self.face_detector = None
-        self.hand_detector = None
 
         # Last detection results (for preview overlay)
         self.last_face_landmarks = None
         self.last_hand_landmarks = None
 
     def initialize_mediapipe(self):
-        """Load MediaPipe face and hand landmarker models."""
+        """Load MediaPipe face landmarker model."""
         face_model = os.path.join(self.model_dir, 'face_landmarker.task')
-        hand_model = os.path.join(self.model_dir, 'hand_landmarker.task')
 
-        # Face landmarker
         face_options = vision.FaceLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=face_model),
             output_face_blendshapes=False,
@@ -62,22 +51,10 @@ class DetectorManager:
         )
         self.face_detector = vision.FaceLandmarker.create_from_options(face_options)
 
-        # Hand landmarker
-        hand_options = vision.HandLandmarkerOptions(
-            base_options=python.BaseOptions(model_asset_path=hand_model),
-            num_hands=2,
-            running_mode=vision.RunningMode.VIDEO,
-        )
-        self.hand_detector = vision.HandLandmarker.create_from_options(hand_options)
-
     def initialize_detectors(self):
-        """Create instances of all detectors (all start disabled)."""
+        """Create mouth breathing detector (starts disabled)."""
         self.detectors = {
             'mouth_breathing': MouthBreathingDetector(),
-            'blink_rate': BlinkDetector(),
-            'eye_rubbing': EyeRubbingDetector(),
-            'face_touching': FaceTouchingDetector(),
-            'hydration': HydrationDetector(),
         }
 
     def enable_detector(self, name):
@@ -130,16 +107,9 @@ class DetectorManager:
         except Exception:
             pass
 
-        try:
-            hand_result = self.hand_detector.detect_for_video(mp_image, timestamp_ms)
-            if hand_result.hand_landmarks:
-                hand_landmarks = hand_result.hand_landmarks
-        except Exception:
-            pass
-
         # Store for preview overlay
         self.last_face_landmarks = face_landmarks
-        self.last_hand_landmarks = hand_landmarks
+        self.last_hand_landmarks = None
 
         frame_h, frame_w = rgb_frame.shape[:2]
 
@@ -152,8 +122,7 @@ class DetectorManager:
                 detected = detector.detect(
                     face_landmarks, hand_landmarks, frame_w, frame_h
                 )
-                if detected and detector.should_alert():
-                    detector.mark_alerted()
+                if detected:
                     alerts.append({
                         'detector': name,
                         'message': detector.get_alert_message(),
@@ -168,16 +137,15 @@ class DetectorManager:
         """Return dict of detector name -> status string."""
         return {name: d.get_status() for name, d in self.detectors.items()}
 
-    def reset_hydration_timer(self):
-        """Reset the hydration detector's timer."""
-        if 'hydration' in self.detectors:
-            self.detectors['hydration'].reset_timer()
+    def get_mouth_counter(self):
+        """Return (current_open_frames, frames_threshold) for the mouth breathing detector."""
+        d = self.detectors.get('mouth_breathing')
+        if d:
+            return d._counter, d.frames_threshold
+        return 0, 450
 
     def cleanup(self):
         """Release MediaPipe resources."""
         if self.face_detector:
             self.face_detector.close()
             self.face_detector = None
-        if self.hand_detector:
-            self.hand_detector.close()
-            self.hand_detector = None

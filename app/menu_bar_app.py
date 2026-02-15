@@ -5,7 +5,9 @@ rumps-based menu bar app with an inline camera preview at the top
 of the dropdown (rendered via an NSImageView in a custom NSMenuItem).
 """
 
+import math
 import queue
+import subprocess
 import rumps
 import objc
 
@@ -43,10 +45,6 @@ class HealthMonitorApp(rumps.App):
 
     MENU_TO_DETECTOR = {
         'Mouth Breathing': 'mouth_breathing',
-        'Blink Rate': 'blink_rate',
-        'Eye Rubbing': 'eye_rubbing',
-        'Face Touching': 'face_touching',
-        'Hydration': 'hydration',
     }
 
     def __init__(self):
@@ -60,6 +58,8 @@ class HealthMonitorApp(rumps.App):
 
         self.detector_manager.initialize_mediapipe()
         self.detector_manager.initialize_detectors()
+        self.detector_manager.enable_detector('mouth_breathing')
+        self.camera_thread.start()
 
         # ── Inline preview ─────────────────────────────────────────────
         # We create a rumps MenuItem, then replace the underlying
@@ -90,18 +90,20 @@ class HealthMonitorApp(rumps.App):
         self._preview_menu_item._menuitem.setHidden_(True)
 
         # ── Menu ───────────────────────────────────────────────────────
+        mouth_breathing_item = rumps.MenuItem('Mouth Breathing', callback=self._toggle_detector)
+        mouth_breathing_item.state = True
+
+        show_preview_item = rumps.MenuItem('Show Camera Preview', callback=self._toggle_preview)
+        show_preview_item.state = True
+
         self.menu = [
             self._preview_menu_item,
             None,
-            rumps.MenuItem('Mouth Breathing', callback=self._toggle_detector),
-            rumps.MenuItem('Blink Rate', callback=self._toggle_detector),
-            rumps.MenuItem('Eye Rubbing', callback=self._toggle_detector),
-            rumps.MenuItem('Face Touching', callback=self._toggle_detector),
-            rumps.MenuItem('Hydration', callback=self._toggle_detector),
+            mouth_breathing_item,
             None,
-            rumps.MenuItem('Show Camera Preview', callback=self._toggle_preview),
-            rumps.MenuItem('Reset Hydration Timer', callback=self._reset_hydration),
+            show_preview_item,
             None,
+            rumps.MenuItem('Contact Support', callback=self._contact_support),
             rumps.MenuItem('Quit', callback=self._quit),
         ]
 
@@ -125,6 +127,9 @@ class HealthMonitorApp(rumps.App):
             self._preview_ns_timer,
             NSRunLoopCommonModes,
         )
+
+        # Enable preview now that _preview_menu_item exists
+        self._set_preview(True)
 
     # ── Detector toggles ───────────────────────────────────────────────
 
@@ -175,10 +180,21 @@ class HealthMonitorApp(rumps.App):
         self._preview_menu_item._menuitem.setHidden_(not enabled)
 
     def _update_preview_tick(self):
-        """~15 Hz on the main thread — converts latest frame to NSImage.
+        """~15 Hz on the main thread — updates menu bar title countdown
+        and converts latest frame to NSImage.
 
         Called by raw NSTimer (no sender argument).
         """
+        # Update menu bar title: countdown while open, !!! when threshold hit
+        counter, threshold = self.detector_manager.get_mouth_counter()
+        if counter >= threshold:
+            self.title = "!!!"
+        elif counter > 0:
+            secs = math.ceil((threshold - counter) / 30)
+            self.title = str(max(1, secs))
+        else:
+            self.title = "HT"
+
         if not self._preview_enabled:
             return
         frame = self.camera_thread.latest_preview_frame
@@ -202,11 +218,9 @@ class HealthMonitorApp(rumps.App):
 
     # ── Misc ───────────────────────────────────────────────────────────
 
-    def _reset_hydration(self, _):
-        self.detector_manager.reset_hydration_timer()
-        rumps.notification(
-            "Habit Tracker", "Hydration Timer Reset",
-            "Timer has been reset. Stay hydrated!",
+    def _contact_support(self, _):
+        subprocess.Popen(
+            ['open', 'mailto:jonathanbernard265@gmail.com?subject=Habit Tracker Support'],
         )
 
     def _quit(self, _):

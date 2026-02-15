@@ -5,6 +5,7 @@ Captures frames, processes them through DetectorManager, sends alerts
 via queue, and optionally prepares annotated preview frames.
 """
 
+import subprocess
 import threading
 import time
 import cv2
@@ -70,11 +71,17 @@ class CameraThread:
         self.latest_preview_frame = None
 
     def _initialize_camera(self):
-        self._camera = cv2.VideoCapture(0)
-        if not self._camera.isOpened():
-            raise RuntimeError("Could not open camera")
-        self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
-        self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
+        for index in [1, 0]:
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    self._camera = cap
+                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
+                    return
+            cap.release()
+        raise RuntimeError("Could not open camera")
 
     def _release_camera(self):
         if self._camera is not None:
@@ -112,16 +119,26 @@ class CameraThread:
                 rgb_frame, self._frame_timestamp_ms
             )
             for alert in alerts:
+                # Play audio immediately on the camera thread — no queue delay
+                subprocess.Popen(
+                    ['afplay', '/System/Library/Sounds/Sosumi.aiff'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 self.alert_queue.put(alert)
 
             # Build preview frame if enabled
             if self._preview_enabled:
+                mouth_counter, mouth_threshold = self.detector_manager.get_mouth_counter()
                 annotated = draw_overlays(
                     frame,
                     self.detector_manager.last_face_landmarks,
                     self.detector_manager.last_hand_landmarks,
                     self.detector_manager.get_all_statuses(),
                     self.detector_manager.enabled_detector_keys(),
+                    mouth_counter=mouth_counter,
+                    mouth_threshold=mouth_threshold,
+                    fps=self.fps,
                 )
                 small = cv2.resize(annotated, (PREVIEW_WIDTH, PREVIEW_HEIGHT))
                 self.latest_preview_frame = small

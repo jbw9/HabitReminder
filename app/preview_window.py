@@ -30,7 +30,8 @@ HAND_CONNECTIONS = [
 
 
 def draw_overlays(bgr_frame, face_landmarks, hand_landmarks,
-                  detector_statuses, enabled_detectors):
+                  detector_statuses, enabled_detectors,
+                  mouth_counter=0, mouth_threshold=450, fps=30):
     """Draw all debug overlays onto a copy of the frame. No GUI calls."""
     frame = bgr_frame.copy()
     h, w = frame.shape[:2]
@@ -39,16 +40,12 @@ def draw_overlays(bgr_frame, face_landmarks, hand_landmarks,
         _draw_face_points(frame, face_landmarks, w, h)
         if 'mouth_breathing' in enabled_detectors:
             _draw_mouth_overlay(frame, face_landmarks, w, h)
-        if 'blink_rate' in enabled_detectors:
-            _draw_eye_overlay(frame, face_landmarks, w, h)
-        if 'face_touching' in enabled_detectors:
-            _draw_face_oval(frame, face_landmarks, w, h,
-                            hand_landmarks is not None)
-        if 'eye_rubbing' in enabled_detectors:
-            _draw_eye_zones(frame, face_landmarks, w, h)
 
     if hand_landmarks:
         _draw_hands(frame, hand_landmarks, w, h)
+
+    if 'mouth_breathing' in enabled_detectors and mouth_counter > 0:
+        _draw_countdown(frame, mouth_counter, mouth_threshold, fps, w, h)
 
     _draw_status_panel(frame, detector_statuses, enabled_detectors)
     return frame
@@ -118,6 +115,46 @@ def _draw_hands(frame, hands, w, h):
             s, e = hand[si], hand[ei]
             cv2.line(frame, (int(s.x * w), int(s.y * h)),
                      (int(e.x * w), int(e.y * h)), MAGENTA, 2)
+
+
+def _draw_countdown(frame, counter, threshold, fps, w, h):
+    """Draw countdown bar while mouth is open; red !!! banner once threshold hit."""
+    if counter >= threshold:
+        # ── Alert state: red tint + !!! banner ──────────────────────────
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 180), -1)
+        cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
+
+        label = "!!! CLOSE YOUR MOUTH !!!"
+        font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2
+        (tw, th), _ = cv2.getTextSize(label, font, scale, thick)
+        tx, ty = (w - tw) // 2, h // 2 + th // 2
+        # Black shadow for legibility
+        cv2.putText(frame, label, (tx + 1, ty + 1), font, scale, (0, 0, 0), thick + 1)
+        cv2.putText(frame, label, (tx, ty), font, scale, (0, 0, 255), thick)
+        return
+
+    # ── Counting down: progress bar ─────────────────────────────────────
+    seconds_remaining = max(0.0, (threshold - counter) / fps)
+    progress = min(1.0, counter / threshold)
+
+    bar_h = 18
+    bar_y = h - bar_h - 28
+    cv2.rectangle(frame, (0, bar_y), (w, bar_y + bar_h), (40, 40, 40), -1)
+
+    fill_w = int(w * progress)
+    if progress < 0.5:
+        color = (0, int(255 * (1 - progress * 2)), 255)          # blue -> yellow
+    else:
+        color = (0, 0, int(255 * (progress - 0.5) * 2 + 100))   # yellow -> red
+    if fill_w > 0:
+        cv2.rectangle(frame, (0, bar_y), (fill_w, bar_y + bar_h), color, -1)
+
+    label = f"CLOSE MOUTH  {seconds_remaining:.1f}s"
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+    tx = (w - tw) // 2
+    ty = bar_y + bar_h - (bar_h - th) // 2 - 2
+    cv2.putText(frame, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1)
 
 
 def _draw_status_panel(frame, statuses, enabled):
