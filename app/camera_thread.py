@@ -12,6 +12,64 @@ import cv2
 
 from app.preview_window import draw_overlays
 
+
+def _request_avfoundation_camera_permission():
+    """
+    Explicitly request camera authorization via the AVFoundation API and
+    block until the user responds (or 60 s elapses).
+
+    Returns True if the camera is authorized, False if denied/restricted.
+    Falls back to True on any unexpected error so that cv2 still gets a
+    chance to open the device.
+
+    WHY THIS EXISTS:
+      OpenCV's AVFoundation backend does NOT call
+      -[AVCaptureDevice requestAccessForMediaType:completionHandler:] before
+      starting a capture session.  On macOS 12+ (and especially Sequoia),
+      if the session is created before TCC authorization is confirmed, the
+      OS delivers only black / zero frames — even after the user later clicks
+      "Allow" — because the *existing* session was started in an unauthorized
+      state.  By requesting and awaiting authorization here first, we ensure
+      the capture session is opened only when access is genuinely granted.
+    """
+    try:
+        import objc
+        from Foundation import NSBundle
+
+        avf_path = '/System/Library/Frameworks/AVFoundation.framework'
+        avf_bundle = NSBundle.bundleWithPath_(avf_path)
+        if not avf_bundle.isLoaded():
+            avf_bundle.load()
+
+        AVCaptureDevice = objc.lookUpClass('AVCaptureDevice')
+        AVMediaTypeVideo = 'vide'  # NSString constant for video
+
+        status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeVideo)
+        # 0 = not determined, 1 = restricted, 2 = denied, 3 = authorized
+        if status == 3:
+            return True   # already authorized — open camera immediately
+        if status in (1, 2):
+            return False  # restricted / denied — don't bother opening
+
+        # status == 0: show the TCC dialog and wait up to 60 s for a response
+        event = threading.Event()
+        result = [False]
+
+        def handler(granted):
+            result[0] = bool(granted)
+            event.set()
+
+        AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+            AVMediaTypeVideo, handler
+        )
+        event.wait(timeout=60)
+        return result[0]
+
+    except Exception:
+        # If anything goes wrong with the ObjC bridge, fall through and
+        # let cv2 try to open the device anyway (old behaviour).
+        return True
+
 # Preview frame size (for inline menu bar preview)
 PREVIEW_WIDTH = 320
 PREVIEW_HEIGHT = 180
@@ -21,7 +79,7 @@ class CameraThread:
     """Background thread for camera capture and detector processing."""
 
     def __init__(self, detector_manager, alert_queue, fps=30,
-                 camera_width=1280, camera_height=720):
+                 camera_width=640, camera_height=480):
         self.detector_manager = detector_manager
         self.alert_queue = alert_queue
         self.fps = fps
@@ -56,7 +114,6 @@ class CameraThread:
         if self._thread is not None and self._thread.is_alive():
             return
         self._running = True
-        self._frame_timestamp_ms = 0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -71,14 +128,30 @@ class CameraThread:
         self.latest_preview_frame = None
 
     def _initialize_camera(self):
-        for index in [1, 0]:
-            cap = cv2.VideoCapture(index)
+        # Ask for authorization BEFORE opening any capture session.
+        # cv2's AVFoundation backend does not do this itself; without it,
+        # macOS returns only black frames until the existing session is
+        # torn down and rebuilt — which is too late if the user already
+        # responded to a dialog that was attached to a dead session.
+        authorized = _request_avfoundation_camera_permission()
+        if not authorized:
+            raise RuntimeError(
+                "Camera access denied. Enable it in "
+                "System Settings → Privacy & Security → Camera."
+            )
+
+        # Use AVFoundation explicitly — the backend macOS ties camera
+        # permissions to. Verify a test read succeeds before accepting the
+        # device; some indices (e.g. 0 for Continuity Camera stub) report
+        # isOpened()=True but deliver no frames at all.
+        for index in [0, 1]:
+            cap = cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
             if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
                     self._camera = cap
-                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
-                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
                     return
             cap.release()
         raise RuntimeError("Could not open camera")
@@ -102,17 +175,44 @@ class CameraThread:
             return
 
         frame_delay = 1.0 / self.fps
+        dead_frames = 0  # consecutive failed/black frames
+        ever_had_valid_frame = False  # True once we've seen real camera data
 
         while self._running:
             loop_start = time.time()
 
             ret, frame = self._camera.read()
-            if not ret:
+
+            # A frame is "dead" if read failed or it's a black buffer
+            # (happens when camera opened before permission was granted).
+            is_dead = not ret or frame is None or frame.sum() == 0
+            if is_dead:
+                dead_frames += 1
+                # Only release-and-reopen if the camera WAS working and then
+                # died (e.g. user revoked permission mid-session, hardware
+                # disconnect).  Do NOT reopen while waiting for the initial
+                # macOS TCC permission dialog — reopening during that window
+                # creates a new capture session, which can dismiss or
+                # duplicate the dialog and leave the permission in a denied
+                # state.  Instead, just keep waiting; once the user clicks
+                # Allow the current session will start delivering real frames.
+                if ever_had_valid_frame and dead_frames >= 90:
+                    self._release_camera()
+                    try:
+                        self._initialize_camera()
+                    except RuntimeError:
+                        pass
+                    dead_frames = 0
+                time.sleep(frame_delay)
                 continue
+            ever_had_valid_frame = True
+            dead_frames = 0
 
             frame = cv2.flip(frame, 1)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            self._frame_timestamp_ms += int(frame_delay * 1000)
+            # Wall-clock timestamp — always monotonically increasing even
+            # when the camera thread is stopped and restarted.
+            self._frame_timestamp_ms = int(time.time() * 1000)
 
             # Run detectors
             alerts = self.detector_manager.process_frame(

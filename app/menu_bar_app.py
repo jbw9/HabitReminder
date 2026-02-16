@@ -8,6 +8,8 @@ of the dropdown (rendered via an NSImageView in a custom NSMenuItem).
 import math
 import queue
 import subprocess
+import threading
+import time
 import rumps
 import objc
 
@@ -48,7 +50,7 @@ class HealthMonitorApp(rumps.App):
     }
 
     def __init__(self):
-        super().__init__("HT", quit_button=None)
+        super().__init__("HR", quit_button=None)
 
         # Core components
         self.detector_manager = DetectorManager()
@@ -93,15 +95,10 @@ class HealthMonitorApp(rumps.App):
         mouth_breathing_item = rumps.MenuItem('Mouth Breathing', callback=self._toggle_detector)
         mouth_breathing_item.state = True
 
-        show_preview_item = rumps.MenuItem('Show Camera Preview', callback=self._toggle_preview)
-        show_preview_item.state = True
-
         self.menu = [
             self._preview_menu_item,
             None,
             mouth_breathing_item,
-            None,
-            show_preview_item,
             None,
             rumps.MenuItem('Contact Support', callback=self._contact_support),
             rumps.MenuItem('Quit', callback=self._quit),
@@ -131,6 +128,28 @@ class HealthMonitorApp(rumps.App):
         # Enable preview now that _preview_menu_item exists
         self._set_preview(True)
 
+        # On first launch the macOS TCC session can be in an unconfirmed state
+        # even after the user clicks "Allow", causing the camera to deliver only
+        # black frames until the capture session is fully torn down and rebuilt.
+        # A one-shot stop→start cycle 1.5 s after launch replicates the manual
+        # toggle-off/toggle-on workaround automatically.
+        threading.Timer(1.5, self._auto_restart_camera).start()
+
+    # ── Auto-restart on launch ─────────────────────────────────────────
+
+    def _auto_restart_camera(self):
+        """Restart the camera thread once shortly after launch.
+
+        Works around a macOS AVFoundation/TCC race where the capture session
+        starts in an unauthorized state and delivers black frames even after
+        the user grants access.  Rebuilding the session from scratch (stop then
+        start) is the only reliable fix once TCC has fully committed the grant.
+        """
+        self.camera_thread.stop()
+        time.sleep(0.3)
+        if self.detector_manager.any_enabled():
+            self.camera_thread.start()
+
     # ── Detector toggles ───────────────────────────────────────────────
 
     def _toggle_detector(self, sender):
@@ -148,31 +167,17 @@ class HealthMonitorApp(rumps.App):
         self._update_camera_state()
 
     def _update_camera_state(self):
+        """Sync camera thread and preview to match detector enabled state."""
         if self.detector_manager.any_enabled():
             if not self.camera_thread.running:
                 self.camera_thread.start()
+            self._set_preview(True)
         else:
             if self.camera_thread.running:
                 self.camera_thread.stop()
-            if self._preview_enabled:
-                self._set_preview(False)
-                self.menu['Show Camera Preview'].state = False
+            self._set_preview(False)
 
     # ── Inline preview ─────────────────────────────────────────────────
-
-    def _toggle_preview(self, sender):
-        if sender.state:
-            self._set_preview(False)
-            sender.state = False
-        else:
-            if not self.camera_thread.running:
-                rumps.notification(
-                    "Habit Tracker", "Camera Not Running",
-                    "Enable at least one detector first.",
-                )
-                return
-            self._set_preview(True)
-            sender.state = True
 
     def _set_preview(self, enabled):
         self._preview_enabled = enabled
@@ -193,7 +198,7 @@ class HealthMonitorApp(rumps.App):
             secs = math.ceil((threshold - counter) / 30)
             self.title = str(max(1, secs))
         else:
-            self.title = "HT"
+            self.title = "HR"
 
         if not self._preview_enabled:
             return

@@ -1,0 +1,33 @@
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+venv/
+env/
+.venv/
+
+# MediaPipe / large model files
+*.task
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Draft / scratch files
+_drafts/
+
+# Test files
+test_opencv_backend.py
+
+# Codesigning
+entitlements.plist

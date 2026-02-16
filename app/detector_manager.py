@@ -6,6 +6,7 @@ Handles initialization, enable/disable, and per-frame processing.
 """
 
 import os
+import sys
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -28,7 +29,11 @@ class DetectorManager:
                        Defaults to project root.
         """
         if model_dir is None:
-            model_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if getattr(sys, 'frozen', False):
+                # Running inside a PyInstaller bundle
+                model_dir = sys._MEIPASS
+            else:
+                model_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.model_dir = model_dir
 
         self.detectors = {}
