@@ -133,7 +133,7 @@ class HealthMonitorApp(rumps.App):
         # black frames until the capture session is fully torn down and rebuilt.
         # A one-shot stop→start cycle 1.5 s after launch replicates the manual
         # toggle-off/toggle-on workaround automatically.
-        threading.Timer(1.5, self._auto_restart_camera).start()
+        threading.Timer(5.0, self._auto_restart_camera).start()
 
     # ── Auto-restart on launch ─────────────────────────────────────────
 
@@ -144,9 +144,23 @@ class HealthMonitorApp(rumps.App):
         starts in an unauthorized state and delivers black frames even after
         the user grants access.  Rebuilding the session from scratch (stop then
         start) is the only reliable fix once TCC has fully committed the grant.
+
+        On subsequent launches TCC is already authorized and the camera works
+        immediately — in that case latest_preview_frame will already be set and
+        we skip the restart entirely, since restarting a healthy session is
+        actively harmful (AVFoundation needs ~1-2 s to release hardware and the
+        short gap causes _initialize_camera to fail or return black frames).
         """
+        # Skip if the camera is still initializing (cv2.VideoCapture + first
+        # cap.read() can take 1-3 s on macOS AVFoundation — we must not
+        # interrupt that blocking call or we'll create two competing threads).
+        # Also skip if the camera is already delivering valid preview frames.
+        if self.camera_thread._initializing or \
+                self.camera_thread.latest_preview_frame is not None:
+            return
+
         self.camera_thread.stop()
-        time.sleep(0.3)
+        time.sleep(1.5)  # Give macOS enough time to release the camera hardware
         if self.detector_manager.any_enabled():
             self.camera_thread.start()
 

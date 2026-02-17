@@ -90,6 +90,7 @@ class CameraThread:
         self._running = False
         self._camera = None
         self._frame_timestamp_ms = 0
+        self._initializing = False  # True while _initialize_camera() is running
 
         # Preview state — main thread reads latest_preview_frame
         self._preview_enabled = False
@@ -163,6 +164,7 @@ class CameraThread:
 
     def _run(self):
         """Main camera loop (background thread)."""
+        self._initializing = True
         try:
             self._initialize_camera()
         except RuntimeError as e:
@@ -173,6 +175,8 @@ class CameraThread:
             })
             self._running = False
             return
+        finally:
+            self._initializing = False
 
         frame_delay = 1.0 / self.fps
         dead_frames = 0  # consecutive failed/black frames
@@ -181,22 +185,40 @@ class CameraThread:
         while self._running:
             loop_start = time.time()
 
-            ret, frame = self._camera.read()
+            # Guard: if _initialize_camera() failed inside the dead-frame
+            # recovery path, self._camera will be None.  Treat that as a
+            # dead frame so the recovery logic retries after the threshold.
+            if self._camera is None:
+                ret, frame = False, None
+            else:
+                ret, frame = self._camera.read()
 
             # A frame is "dead" if read failed or it's a black buffer
             # (happens when camera opened before permission was granted).
             is_dead = not ret or frame is None or frame.sum() == 0
             if is_dead:
                 dead_frames += 1
-                # Only release-and-reopen if the camera WAS working and then
-                # died (e.g. user revoked permission mid-session, hardware
-                # disconnect).  Do NOT reopen while waiting for the initial
-                # macOS TCC permission dialog — reopening during that window
-                # creates a new capture session, which can dismiss or
-                # duplicate the dialog and leave the permission in a denied
-                # state.  Instead, just keep waiting; once the user clicks
-                # Allow the current session will start delivering real frames.
-                if ever_had_valid_frame and dead_frames >= 90:
+                # Recover in two situations:
+                #   1. Camera WAS working then died (permission revoked,
+                #      hardware disconnect, AVFoundation hiccup) — retry
+                #      after 90 consecutive dead frames (~3 s at 30 fps).
+                #   2. Camera opened but NEVER delivered a valid frame —
+                #      this happens after a rapid close/reopen (e.g. the
+                #      auto-restart on first launch) when AVFoundation
+                #      needs more time to settle.  Wait 5 s (150 frames)
+                #      before retrying so we don't hammer the driver, but
+                #      DO retry — without this the thread would spin
+                #      forever and the preview would stay permanently blank.
+                #
+                # Note: the original "ever_had_valid_frame" guard was meant
+                # to avoid reopening during a TCC permission dialog.  That
+                # guard is no longer needed here because
+                # _request_avfoundation_camera_permission() blocks until the
+                # dialog is resolved, so by the time we reach this loop TCC
+                # is already settled and it is safe to retry.
+                worked_then_died = ever_had_valid_frame and dead_frames >= 90
+                startup_stalled = (not ever_had_valid_frame) and dead_frames >= 150
+                if worked_then_died or startup_stalled:
                     self._release_camera()
                     try:
                         self._initialize_camera()
