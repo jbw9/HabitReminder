@@ -252,6 +252,7 @@ class CameraThread:
             # Build preview frame if enabled
             if self._preview_enabled:
                 mouth_counter, mouth_threshold = self.detector_manager.get_mouth_counter()
+                nail_counter, nail_threshold = self.detector_manager.get_nail_counter()
                 annotated = draw_overlays(
                     frame,
                     self.detector_manager.last_face_landmarks,
@@ -260,6 +261,8 @@ class CameraThread:
                     self.detector_manager.enabled_detector_keys(),
                     mouth_counter=mouth_counter,
                     mouth_threshold=mouth_threshold,
+                    nail_counter=nail_counter,
+                    nail_threshold=nail_threshold,
                     fps=self.fps,
                 )
                 small = cv2.resize(annotated, (PREVIEW_WIDTH, PREVIEW_HEIGHT))

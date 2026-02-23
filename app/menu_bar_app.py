@@ -47,6 +47,7 @@ class HealthMonitorApp(rumps.App):
 
     MENU_TO_DETECTOR = {
         'Mouth Breathing': 'mouth_breathing',
+        'Nail Biting': 'nail_biting',
     }
 
     def __init__(self):
@@ -95,10 +96,14 @@ class HealthMonitorApp(rumps.App):
         mouth_breathing_item = rumps.MenuItem('Mouth Breathing', callback=self._toggle_detector)
         mouth_breathing_item.state = True
 
+        nail_biting_item = rumps.MenuItem('Nail Biting', callback=self._toggle_detector)
+        nail_biting_item.state = False
+
         self.menu = [
             self._preview_menu_item,
             None,
             mouth_breathing_item,
+            nail_biting_item,
             None,
             rumps.MenuItem('Contact Support', callback=self._contact_support),
             rumps.MenuItem('Quit', callback=self._quit),
@@ -204,12 +209,26 @@ class HealthMonitorApp(rumps.App):
 
         Called by raw NSTimer (no sender argument).
         """
-        # Update menu bar title: countdown while open, !!! when threshold hit
-        counter, threshold = self.detector_manager.get_mouth_counter()
+        # Update menu bar title: show countdown for whichever detector is closest to alert
+        mouth_counter, mouth_threshold = self.detector_manager.get_mouth_counter()
+        nail_counter, nail_threshold = self.detector_manager.get_nail_counter()
+
+        # Calculate progress percentage for each detector
+        mouth_progress = mouth_counter / mouth_threshold if mouth_threshold > 0 else 0
+        nail_progress = nail_counter / nail_threshold if nail_threshold > 0 else 0
+
+        # Use whichever detector has made more progress
+        if mouth_progress >= nail_progress and mouth_counter > 0:
+            counter, threshold, fps = mouth_counter, mouth_threshold, 30
+        elif nail_counter > 0:
+            counter, threshold, fps = nail_counter, nail_threshold, 30
+        else:
+            counter, threshold, fps = 0, 1, 30
+
         if counter >= threshold:
             self.title = "!!!"
         elif counter > 0:
-            secs = math.ceil((threshold - counter) / 30)
+            secs = math.ceil((threshold - counter) / fps)
             self.title = str(max(1, secs))
         else:
             self.title = "HR"

@@ -12,6 +12,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from detectors.mouth_breathing_detector import MouthBreathingDetector
+from detectors.nail_biting_detector import NailBitingDetector
 
 
 class DetectorManager:
@@ -20,6 +21,7 @@ class DetectorManager:
     # Map of detector keys to human-readable names
     DETECTOR_NAMES = {
         'mouth_breathing': 'Mouth Breathing',
+        'nail_biting': 'Nail Biting',
     }
 
     def __init__(self, model_dir=None):
@@ -38,14 +40,16 @@ class DetectorManager:
 
         self.detectors = {}
         self.face_detector = None
+        self.hand_detector = None
 
         # Last detection results (for preview overlay)
         self.last_face_landmarks = None
         self.last_hand_landmarks = None
 
     def initialize_mediapipe(self):
-        """Load MediaPipe face landmarker model."""
+        """Load MediaPipe face and hand landmarker models."""
         face_model = os.path.join(self.model_dir, 'face_landmarker.task')
+        hand_model = os.path.join(self.model_dir, 'hand_landmarker.task')
 
         face_options = vision.FaceLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=face_model),
@@ -56,10 +60,18 @@ class DetectorManager:
         )
         self.face_detector = vision.FaceLandmarker.create_from_options(face_options)
 
+        hand_options = vision.HandLandmarkerOptions(
+            base_options=python.BaseOptions(model_asset_path=hand_model),
+            num_hands=2,
+            running_mode=vision.RunningMode.VIDEO,
+        )
+        self.hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+
     def initialize_detectors(self):
-        """Create mouth breathing detector (starts disabled)."""
+        """Create all detectors (start disabled)."""
         self.detectors = {
             'mouth_breathing': MouthBreathingDetector(),
+            'nail_biting': NailBitingDetector(),
         }
 
     def enable_detector(self, name):
@@ -112,9 +124,16 @@ class DetectorManager:
         except Exception:
             pass
 
+        try:
+            hand_result = self.hand_detector.detect_for_video(mp_image, timestamp_ms)
+            if hand_result.hand_landmarks:
+                hand_landmarks = hand_result.hand_landmarks  # List of all detected hands
+        except Exception:
+            pass
+
         # Store for preview overlay
         self.last_face_landmarks = face_landmarks
-        self.last_hand_landmarks = None
+        self.last_hand_landmarks = hand_landmarks
 
         frame_h, frame_w = rgb_frame.shape[:2]
 
@@ -149,8 +168,18 @@ class DetectorManager:
             return d._counter, d.frames_threshold
         return 0, 450
 
+    def get_nail_counter(self):
+        """Return (current_proximity_frames, frames_threshold) for the nail biting detector."""
+        d = self.detectors.get('nail_biting')
+        if d:
+            return d._counter, d.frames_threshold
+        return 0, 60
+
     def cleanup(self):
         """Release MediaPipe resources."""
         if self.face_detector:
             self.face_detector.close()
             self.face_detector = None
+        if self.hand_detector:
+            self.hand_detector.close()
+            self.hand_detector = None
